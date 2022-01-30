@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -75,8 +78,29 @@ func (d Download) Do() error {
 
 	}
 
-	fmt.Println(sections)
+	// fmt.Println(sections)
 
+	var wg sync.WaitGroup
+	for i, s := range sections {
+
+		i, s := i, s
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err = d.downloadSection(i, s)
+
+			if err != nil {
+				panic(err)
+			}
+
+		}()
+	}
+	wg.Wait()
+
+	err = d.mergeFiles(sections)
+	if err != nil {
+		log.Fatalf("An error occurred while merging the sections:%v\n", err)
+	}
 	return nil
 
 }
@@ -94,4 +118,59 @@ func (d Download) getNewRequest(method string) (*http.Request, error) {
 	r.Header.Set("User-Agent", "Silly Download Manager v0.01")
 
 	return r, nil
+}
+
+func (d Download) downloadSection(i int, s [2]int) error {
+
+	r, err := d.getNewRequest("GET")
+	if err != nil {
+		log.Fatalf("An error occurred while creating GET request for downloading %v\n", err)
+	}
+
+	r.Header.Set("Range", fmt.Sprintf("bytes=%v-%v", s[0], s[1]))
+
+	resp, err := http.DefaultClient.Do(r)
+
+	if err != nil {
+		log.Fatalf("An error occurred while receiving the response %v\n", err)
+	}
+
+	fmt.Printf("Downloaded %v bystes for section %v:%v\n", resp.Header.Get("Content-Length"), i, s)
+
+	b, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		log.Fatalf("An error occurred while reading the response %v\n", err)
+	}
+
+	err = ioutil.WriteFile(fmt.Sprintf("section-%v.tmp", i), b, os.ModePerm)
+	if err != nil {
+		log.Fatalf("An error occurred while writing the file %v\n", err)
+	}
+	return nil
+}
+
+func (d Download) mergeFiles(sections [][2]int) error {
+	f, err := os.OpenFile(d.TargetPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for i := range sections {
+		tmpFileName := fmt.Sprintf("section-%v.tmp", i)
+		b, err := ioutil.ReadFile(tmpFileName)
+		if err != nil {
+			return err
+		}
+		n, err := f.Write(b)
+		if err != nil {
+			return err
+		}
+		err = os.Remove(tmpFileName)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%v bytes merged\n", n)
+	}
+	return nil
 }
