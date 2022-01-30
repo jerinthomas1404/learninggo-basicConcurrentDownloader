@@ -56,6 +56,27 @@ func (d Download) Do() error {
 	}
 	fmt.Printf("Size is %v bytes\n", size)
 
+	var sections = make([][2]int, d.TotalSections)
+	eachSize := size / d.TotalSections
+	fmt.Printf("Size of each section: %v \n", eachSize)
+
+	for i := range sections {
+		if i == 0 {
+			sections[i][0] = 0
+		} else {
+			sections[i][0] = sections[i-1][1] + 1
+		}
+
+		if i < d.TotalSections-1 {
+			sections[i][1] = sections[i][0] + eachSize
+		} else {
+			sections[i][1] = size - 1
+		}
+
+	}
+
+	fmt.Println(sections)
+
 	return nil
 
 }
